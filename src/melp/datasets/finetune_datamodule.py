@@ -17,7 +17,7 @@ class ECGDataModule(LightningDataModule):
         self.num_workers = num_workers
         self.train_data_pct = train_data_pct
         assert dataset_name in ["ptbxl_super_class", "ptbxl_sub_class", "ptbxl_form", "ptbxl_rhythm", 
-                                "icbeb", "chapman", "code"], f"Invalid dataset name {self.dataset_name} found"
+                                "icbeb", "chapman", "code"], f"Invalid dataset name {dataset_name} found"
         self.dataset_name = dataset_name
         self.dataset_dir = dataset_dir
         if "ptbxl" in dataset_name:
@@ -93,16 +93,12 @@ class ECGDataModule(LightningDataModule):
 
 if __name__ == "__main__":
     dm = ECGDataModule(
-        dataset_dir=RAW_DATA_PATH,
+        dataset_dir=str(RAW_DATA_PATH),
         dataset_name="ptbxl_super_class",
         batch_size=4,
         num_workers=1,
         train_data_pct=0.1,
-        use_ecg_patch=True
     )
-    for batch in dm.train_dataloader():
-        break
+    batch = next(iter(dm.train_dataloader()))
     print(batch["ecg"].shape)
-    print(batch["ecg_patch"].shape)
-    print(batch["t_indices"].shape)
-    ipdb.set_trace()
+    print(batch["label"].shape)

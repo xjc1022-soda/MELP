@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributed as distributed
 from einops import rearrange, repeat
+from melp.paths import PROCESSED_DATA_PATH
 
 
 def l2norm(t):
@@ -209,7 +210,7 @@ if __name__ == "__main__":
     tokenizer = QRS_Tokenizer(window_size=96, sentence_len=252)
     quantizer = NormEMAVectorQuantizer(n_embed=8196, embedding_dim=96, beta=0.25, decay=0.99, eps=1e-5)
     dm = ECGTextDataModule(
-        dataset_dir="/disk1/*/ECG/processed_data",
+        dataset_dir=str(PROCESSED_DATA_PATH),
         dataset_list=["mimic-iv-ecg"],
         batch_size=32,
         num_workers=1,
