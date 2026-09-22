@@ -10,8 +10,8 @@ from pprint import pprint
 from tqdm import tqdm
 import multiprocessing as mp
 import sys
-from mmecg.paths import RAW_DATA_PATH, PROCESSED_DATA_PATH
-from mmecg.paths import ROOT_PATH as REPO_ROOT_DIR
+from melp.paths import RAW_DATA_PATH, PROCESSED_DATA_PATH
+from melp.paths import ROOT_PATH as REPO_ROOT_DIR
 
 '''
 python preprocess_mimic_iv_ecg.py
@@ -158,7 +158,7 @@ def main():
     report_csv = report_csv.merge(record_csv, on="id", how="inner")
     
     # split csv to train and val
-    split_dir = REPO_ROOT_DIR / "src/mmecg/data_split/mimic-iv-ecg"
+    split_dir = REPO_ROOT_DIR / "src/melp/data_split/mimic-iv-ecg"
     os.makedirs(split_dir, exist_ok=True)
     unique_subject_ids = report_csv["subject_id"].unique()
     # split should be done based on subject_id instead of rows ...

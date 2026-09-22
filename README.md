@@ -23,15 +23,23 @@ pip install -e .
 
 ## Dataset Preparation
 
-Before running, please config the `RAW_DATA_PATH` of `src/melp/paths.py` into your corresponding path.
+Every filesystem root resolves from the environment (see `src/melp/paths.py`; run
+`python src/melp/paths.py` to print what currently resolves and whether it exists).
 
 ```
-RAW_DATA_PATH
+MELP_RAW_DATA_PATH            # raw datasets, one directory per dataset
 |- mimic-iv-ecg
 |- ptbxl
 |- icbeb
 |- chapman
+
+MELP_PROCESSED_DATA_PATH      # output of scripts/preprocess/*; defaults next to the raw root
+MELP_SPLIT_DIR                # data splits; defaults to the ones shipped under src/melp/data_split
+MELP_ECGFM_PATH               # ECG-FM checkpoint used to initialise the ECG encoder (optional)
 ```
+
+The MIMIC-IV-ECG splits are not shipped in this repo — download them (link below) and either
+drop them at `src/melp/data_split/mimic-iv-ecg/` or point `MELP_SPLIT_DIR` at where they live.
 ECG: 
 - [MIMIC-IV](https://physionet.org/content/mimic-iv-ecg/1.0/)
 - [PTB-XL](https://physionet.org/content/ptb-xl/1.0.3/)
@@ -53,6 +61,18 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python main_pretrain.py --num_devices 4 --train_dat
     --lr 2e-4 --model_name melp --batch_size 64 --max_epochs 100 \
     --ecg_encoder_name ecgfm \
     --clip_loss_weight 1.0 --caption_loss_weight 2.0 --local_loss_weight 0.2
+```
+
+`--ecg_source` selects where the pretraining waveforms are read from: `raw` (default) reads
+the wfdb records under `MELP_RAW_DATA_PATH/mimic-iv-ecg/`, `processed` reads the denoised
+`.npy` store written by `scripts/preprocess/preprocess_mimic_iv_ecg.py` under
+`MELP_PROCESSED_DATA_PATH/mimic-iv-ecg/records/`. The two are not interchangeable -- pick one
+and keep it fixed across a set of runs.
+
+## Smoke test
+
+```
+python scripts/smoke_test.py      # datasets, model forward/loss/backward, zero-shot, linear probe, pretraining
 ```
 
 ## Evaluation 

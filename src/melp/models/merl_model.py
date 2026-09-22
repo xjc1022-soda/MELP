@@ -12,7 +12,7 @@ from sklearn.metrics import roc_auc_score, precision_recall_curve, accuracy_scor
 from melp.backbone.resnet1d import ResNet18, ResNet34, ResNet50, ResNet101
 from melp.backbone.vit1d import vit_tiny, vit_small, vit_middle, vit_base
 from melp.backbone.pooling import AttentionPool2d
-from melp.models.base_pretrain_model import BasePretrainModel
+from melp.models.base_pretrain_model import BasePretrainModel, dist_rank_and_world_size
 # from melp.utils.utils_loss import clip_loss
 from melp.utils.openclip_loss import ClipLoss
 from melp.paths import PROMPT_PATH, DATASET_LABELS_PATH
@@ -280,8 +280,8 @@ class MERLModel(BasePretrainModel):
             local_loss=True,
             gather_with_grad=True,
             cache_labels=True,
-            rank=torch.distributed.get_rank(),
-            world_size=torch.distributed.get_world_size(),
+            rank=dist_rank_and_world_size()[0],
+            world_size=dist_rank_and_world_size()[1],
             use_horovod=False
         )
 

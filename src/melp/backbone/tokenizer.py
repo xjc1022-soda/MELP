@@ -6,6 +6,7 @@ from scipy.signal import butter, sosfilt
 import neurokit2 as nk
 import pandas as pd
 import ipdb
+from melp.paths import RAW_DATA_PATH
 
 
 class QRS_Tokenizer(nn.Module):
@@ -131,7 +132,7 @@ if __name__ == "__main__":
     from melp.datasets.pretrain_datamodule import ECGTextDataModule
     tokenizer = QRS_Tokenizer(window_size=96, sentence_len=252)
     dm = ECGTextDataModule(
-        dataset_dir="/disk1/*/ECG/raw",
+        dataset_dir=str(RAW_DATA_PATH),
         dataset_list=["mimic-iv-ecg"],
         batch_size=4,
         num_workers=1,

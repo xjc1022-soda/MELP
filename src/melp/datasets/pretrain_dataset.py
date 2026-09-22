@@ -12,7 +12,7 @@ from tqdm import tqdm
 from einops import rearrange
 import wfdb
 import itertools
-from melp.paths import SPLIT_DIR
+from melp.paths import SPLIT_DIR, RAW_DATA_PATH, PROCESSED_DATA_PATH
 from melp.datasets.augmentations import RandomLeadsMask
 
 
@@ -28,10 +28,23 @@ class ECG_Text_Dataset(Dataset):
                  use_cmsc: bool = False,
                  use_rlm: bool = False,
                  num_beats: int = 1,
+                 ecg_source: str = "raw",
                  ):
-        
+        """
+        Args:
+            ecg_source: where the waveforms are read from.
+                "raw"       -- wfdb records under ``dataset_dir/<dataset>/<path>``,
+                               i.e. the PhysioNet download as distributed.
+                "processed" -- ``PROCESSED_DATA_PATH/<dataset>/records/<id>.npy``,
+                               the denoised output of scripts/preprocess/*.
+                The two differ (the processed store is neurokit2-denoised), so pick
+                one deliberately and keep it fixed across a set of runs.
+        """
         super().__init__()
-        
+
+        if ecg_source not in ("raw", "processed"):
+            raise ValueError(f"ecg_source must be 'raw' or 'processed', got {ecg_source!r}")
+        self.ecg_source = ecg_source
         self.split = split
         self.dataset_dir = dataset_dir
         self.dataset_list = dataset_list
@@ -52,8 +65,23 @@ class ECG_Text_Dataset(Dataset):
         all_df = []
         for dataset_name in self.dataset_list:
             df = pd.read_csv(SPLIT_DIR / f"{dataset_name}/{self.split}.csv", low_memory=False)
-            df["path"] = df["path"].apply(lambda x: os.path.join(self.dataset_dir, dataset_name, x))
-            print(f"Loading {dataset_name} {self.split} dataset: total {len(df)} samples")
+            if self.ecg_source == "raw":
+                df["ecg_path"] = df["path"].apply(
+                    lambda x: os.path.join(self.dataset_dir, dataset_name, x))
+                probe = df["ecg_path"].iloc[0] + ".hea"
+            else:
+                records_dir = PROCESSED_DATA_PATH / dataset_name / "records"
+                df["ecg_path"] = df["id"].apply(lambda x: str(records_dir / f"{x}.npy"))
+                probe = df["ecg_path"].iloc[0]
+            if not os.path.exists(probe):
+                raise FileNotFoundError(
+                    f"{dataset_name} {self.split}: no waveform at {probe}. "
+                    f"ecg_source={self.ecg_source!r} reads from "
+                    f"{self.dataset_dir if self.ecg_source == 'raw' else PROCESSED_DATA_PATH}; "
+                    "point MELP_RAW_DATA_PATH / MELP_PROCESSED_DATA_PATH at the right root, "
+                    "or switch ecg_source.")
+            print(f"Loading {dataset_name} {self.split} dataset ({self.ecg_source}): "
+                  f"total {len(df)} samples")
             all_df.append(df)
         self.df = pd.concat(all_df)
         # sample data
@@ -66,8 +94,10 @@ class ECG_Text_Dataset(Dataset):
         row = self.df.iloc[idx]
         patient_id = torch.tensor([row["subject_id"]]).long()
         report = row["total_report"]
-        # ecg = np.load(row["path"])
-        ecg = wfdb.rdsamp(row["path"])[0].T
+        if self.ecg_source == "raw":
+            ecg = wfdb.rdsamp(row["ecg_path"])[0].T
+        else:
+            ecg = np.load(row["ecg_path"])
         # normalize ecg into 0 - 1
         ecg = (ecg - np.min(ecg)) / (np.max(ecg) - np.min(ecg) + 1e-8)
         ecg = torch.tensor(ecg).float()
@@ -149,7 +179,7 @@ if __name__ == "__main__":
     #     output_size=output_size),
     #     TTimeOut(crop_ratio_range=to_crop_ratio_range)
     # ]
-    dataset = ECG_Text_Dataset(split="test", dataset_dir="/data1/r20user2/ECG/raw",  
+    dataset = ECG_Text_Dataset(split="test", dataset_dir=str(RAW_DATA_PATH),  
                                dataset_list=["mimic-iv-ecg"],
                                use_cmsc=False,
                                use_rlm=False,

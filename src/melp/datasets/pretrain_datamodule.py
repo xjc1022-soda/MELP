@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 from lightning import LightningDataModule
 from melp.datasets.pretrain_dataset import ECG_Text_Dataset
 from melp.datasets.finetune_dataset import ECGDataset
-from melp.paths import SPLIT_DIR
+from melp.paths import SPLIT_DIR, RAW_DATA_PATH
 
 
 class ECGTextDataModule(LightningDataModule):
@@ -23,6 +23,7 @@ class ECGTextDataModule(LightningDataModule):
                  use_rlm: bool = False,
                  transforms = None,
                  n_views: int = 1,
+                 ecg_source: str = "raw",
                  ):
         super().__init__()
 
@@ -36,6 +37,7 @@ class ECGTextDataModule(LightningDataModule):
         self.use_rlm = use_rlm
         self.transforms = transforms
         self.n_views = n_views
+        self.ecg_source = ecg_source
 
     def train_dataloader(self):
 
@@ -47,7 +49,8 @@ class ECGTextDataModule(LightningDataModule):
             use_cmsc=self.use_cmsc,
             use_rlm=self.use_rlm,
             transforms=self.transforms,
-            n_views=self.n_views
+            n_views=self.n_views,
+            ecg_source=self.ecg_source
         )
 
         train_dataloader = DataLoader(
@@ -73,6 +76,7 @@ class ECGTextDataModule(LightningDataModule):
 
                 transforms=self.transforms,
                 n_views=self.n_views,
+                ecg_source=self.ecg_source,
             )
 
             val_dataloader = DataLoader(
@@ -126,7 +130,8 @@ class ECGTextDataModule(LightningDataModule):
             use_cmsc=self.use_cmsc,
             use_rlm=self.use_rlm,
             transforms=self.transforms,
-            n_views=self.n_views
+            n_views=self.n_views,
+            ecg_source=self.ecg_source
         )
 
         test_dataloader = DataLoader(
@@ -142,7 +147,7 @@ class ECGTextDataModule(LightningDataModule):
 
 if __name__ == "__main__":
     dm = ECGTextDataModule(
-        dataset_dir="/disk1/*/ECG/raw",
+        dataset_dir=str(RAW_DATA_PATH),
         dataset_list=["mimic-iv-ecg"],
         val_dataset_list=None,
         batch_size=4,

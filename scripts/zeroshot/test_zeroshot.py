@@ -39,12 +39,12 @@ def load_model(model_name: str, ckpt_path: str):
         else:
             # model = MERLModel.load_from_checkpoint(ckpt_path)
             model = MERLModel()
-            model.load_state_dict(torch.load(ckpt_path))
+            model.load_state_dict(torch.load(ckpt_path, map_location="cpu", weights_only=False))
     elif model_name == "melp":
         if ckpt_path == "":
             model = MELPModel()
         else:
-            model = MELPModel.load_from_checkpoint(ckpt_path, ecg_encoder_weight=str(ECGFM_PATH))
+            model = MELPModel.load_from_checkpoint(ckpt_path, ecg_encoder_weight=str(ECGFM_PATH), weights_only=False)
     else:
         raise NotImplementedError(f"Model {model_name} not implemented.")
 

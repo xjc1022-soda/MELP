@@ -89,20 +89,20 @@ def main(hparams: Namespace):
         if hparams.ckpt_path:
             # pretrain_model = MERLModel.load_from_checkpoint(hparams.ckpt_path)
             pretrain_model = MERLModel()
-            pretrain_model.ecg_encoder.load_state_dict(torch.load(hparams.ckpt_path))
+            pretrain_model.ecg_encoder.load_state_dict(torch.load(hparams.ckpt_path, map_location="cpu", weights_only=False))
         else:
             pretrain_model = MERLModel()
         hparams.in_features = pretrain_model.proj_out
     elif hparams.model_name == "ecgfm":
         if hparams.ckpt_path:
             pretrain_model = ECGFMModel.load_from_checkpoint(
-                hparams.ckpt_path)
+                hparams.ckpt_path, weights_only=False)
         else:
             pretrain_model = ECGFMModel()
         hparams.in_features = 1024
     elif hparams.model_name == "melp":
         if hparams.ckpt_path:
-            pretrain_model = MELPModel.load_from_checkpoint(hparams.ckpt_path)
+            pretrain_model = MELPModel.load_from_checkpoint(hparams.ckpt_path, weights_only=False)
         else:
             pretrain_model = MELPModel()
         hparams.in_features = 256

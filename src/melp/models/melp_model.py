@@ -5,6 +5,7 @@ Contributions:
 2. SOTA unimodal pretraining.
 3. Local-to-Global cross-modal learning.
 '''
+import os
 from typing import List, Optional
 from dataclasses import dataclass
 import numpy as np
@@ -17,6 +18,7 @@ from einops import rearrange
 from timm.models import create_model
 from transformers import AutoModel, AutoTokenizer, AutoModelForCausalLM
 from melp.models.merl_model import MERLModel
+from melp.models.base_pretrain_model import dist_rank_and_world_size
 from melp.backbone.transformer import  (
     LayerNorm,
     QuickGELU,
@@ -251,6 +253,15 @@ class CustomResNet18(nn.Module):
         return pooled
 
 
+# Any BERT-family encoder goes down the same path -- hardcoding two hub ids rejects a
+# locally pretrained one (e.g. the stage-1 cardiology LM) for no reason.
+_BERT_TEXT_ENCODERS = ("ncbi/MedCPT-Query-Encoder", "fuyingw/heart_bert")
+
+
+def _is_bert_text_encoder(name: str) -> bool:
+    return name in _BERT_TEXT_ENCODERS or os.path.isdir(name)
+
+
 class MELPModel(MERLModel):
     def __init__(self, 
                  ecg_encoder_name: str = "ecgfm",
@@ -266,6 +277,8 @@ class MELPModel(MERLModel):
                  shared_emb_dim: int = 256,
                  num_leads: int = 12,
                  num_freeze_layers: int = 6,
+                 freeze_text_proj: bool = False,
+                 text_encoder_mode: str = "causal",
                  init_logit_scale: float = np.log(1 / 0.07),
                  lr: float = 2e-4,
                  weight_decay: float = 0.2,
@@ -279,6 +292,11 @@ class MELPModel(MERLModel):
         self.caption_loss_weight = caption_loss_weight
         self.local_loss_weight = local_loss_weight
         self.max_seq_len = max_seq_len
+        self.freeze_text_proj = freeze_text_proj
+        if text_encoder_mode not in ("causal", "bidirectional"):
+            raise ValueError(f"text_encoder_mode must be causal|bidirectional, "
+                             f"got {text_encoder_mode!r}")
+        self.text_encoder_mode = text_encoder_mode
 
         super().__init__(ecg_encoder_name=ecg_encoder_name,
                          text_encoder_name=text_encoder_name,
@@ -293,7 +311,7 @@ class MELPModel(MERLModel):
                          **kwargs)
         self.save_hyperparameters()
 
-        if self.text_encoder_name in ["ncbi/MedCPT-Query-Encoder", "fuyingw/heart_bert"]:
+        if _is_bert_text_encoder(self.text_encoder_name):
             self.sent_proj = nn.Linear(768, self.shared_emb_dim)
         else:
             raise NotImplementedError
@@ -322,9 +340,10 @@ class MELPModel(MERLModel):
                                     use_attentional_pool_contrast=True,
                                     use_attentional_pool_caption=True,
                                     n_queries_caption=128,
+                                    n_queries_contrast=self.n_queries_contrast,
                                     model_size="small"
                                     )
-                ckpt = torch.load(self.ecg_encoder_weight)["state_dict"]
+                ckpt = torch.load(self.ecg_encoder_weight, map_location="cpu", weights_only=False)["state_dict"]
                 new_ckpt = dict()
                 for k, v in ckpt.items():
                     if "attn_pool_contrast" not in k:
@@ -347,13 +366,28 @@ class MELPModel(MERLModel):
             raise NotImplementedError
 
     def init_text_encoder(self):
-        if self.text_encoder_name in ["ncbi/MedCPT-Query-Encoder", "fuyingw/heart_bert"]:
-            self.lm_model = AutoModelForCausalLM.from_pretrained(
-                self.text_encoder_name, is_decoder=True)
+        if _is_bert_text_encoder(self.text_encoder_name):
+            if self.text_encoder_mode == "causal":
+                # is_decoder=True puts a causal mask on BERT: each token only sees its
+                # left context. Fine for a decoder, but these encoders are trained with
+                # bidirectional MLM, so it is a mismatch with how they learned.
+                self.lm_model = AutoModelForCausalLM.from_pretrained(
+                    self.text_encoder_name, is_decoder=True)
+            else:
+                self.lm_model = AutoModel.from_pretrained(self.text_encoder_name)
+
+            # BertLMHeadModel nests the encoder under .bert; BertModel is the encoder.
+            bert = getattr(self.lm_model, "bert", self.lm_model)
 
             # freeze layers
             for layer_idx in range(self.num_freeze_layers):
-                for param in list(self.lm_model.bert.encoder.layer[layer_idx].parameters()):
+                for param in list(bert.encoder.layer[layer_idx].parameters()):
+                    param.requires_grad = False
+            # Freezing every encoder layer still leaves the embedding table trainable,
+            # and that table is the stack's input -- the tower's output would keep
+            # drifting anyway. Freeze it too so "all layers frozen" means what it says.
+            if self.num_freeze_layers >= len(bert.encoder.layer):
+                for param in bert.embeddings.parameters():
                     param.requires_grad = False
 
             text_encoder_hidden_dim = 768
@@ -365,6 +399,13 @@ class MELPModel(MERLModel):
             nn.GELU(),
             nn.Linear(self.proj_hidden, self.proj_out),
         )
+        # proj_t sits after the (optionally frozen) encoder and is what actually places
+        # a prompt in the shared space -- freezing the encoder alone still lets the
+        # zero-shot class weights move. Freezing this too pins them exactly, so the ECG
+        # tower has to align to a fixed text anchor.
+        if self.freeze_text_proj:
+            for param in self.proj_t.parameters():
+                param.requires_grad = False
         self.tokenizer = AutoTokenizer.from_pretrained(
             self.text_encoder_name)
         self.tokenizer.add_special_tokens({'bos_token': '[BOS]'})
@@ -426,7 +467,7 @@ class MELPModel(MERLModel):
         return batch_sent_embs
 
     def _encode_text(self, input_ids, attention_mask, normalize=True, return_sent_emb=True):
-        if self.text_encoder_name in ["ncbi/MedCPT-Query-Encoder", "fuyingw/heart_bert"]:
+        if _is_bert_text_encoder(self.text_encoder_name):
             input_ids = torch.cat((
                 input_ids,
                 self.tokenizer.cls_token_id * torch.ones(len(input_ids), 1, dtype=torch.long).type_as(input_ids)),
@@ -470,14 +511,14 @@ class MELPModel(MERLModel):
         
     @torch.no_grad()
     def get_text_emb(self, input_ids, attention_mask):
-        if self.text_encoder_name in ["ncbi/MedCPT-Query-Encoder", "*/heart_bert"]:
-            text_output = self.lm_model(input_ids=input_ids, attention_mask=attention_mask)
-            # using the CLS token as the global embedding
-            text_emb = text_output.last_hidden_state[:, -1]
-        else:
-            raise NotImplementedError
+        """Global text embedding used to build zero-shot class weights.
 
-        proj_text_emb = self.proj_t(text_emb)
+        Delegates to ``_encode_text`` so the embedding is taken exactly the way it is
+        during pretraining (trailing [CLS] appended, last hidden state, ``proj_t``).
+        Returned unnormalised: every caller normalises before averaging templates.
+        """
+        proj_text_emb, _ = self._encode_text(
+            input_ids, attention_mask, normalize=False, return_sent_emb=False)
 
         return proj_text_emb
 
@@ -566,8 +607,10 @@ class MELPModel(MERLModel):
     def shared_step(self, batch, batch_idx):
         
         # only used in the training step
+        rank, world_size = dist_rank_and_world_size()
+
         if (batch_idx % 1000 == 0) and (self.local_rank == 0):
-            print(f"Generated reports in rank {torch.distributed.get_rank()}")
+            print(f"Generated reports in rank {rank}")
             ecg_out = self.generate(batch['ecg'][:4], seq_len=self.max_seq_len)
             print(self.tokenizer.batch_decode(ecg_out[:4], skip_special_tokens=True))
             print("Ground truth:")
@@ -584,8 +627,8 @@ class MELPModel(MERLModel):
             local_loss=True,
             gather_with_grad=True,
             cache_labels=True,
-            rank=torch.distributed.get_rank(),
-            world_size=torch.distributed.get_world_size(),
+            rank=rank,
+            world_size=world_size,
             use_horovod=False
         )
 

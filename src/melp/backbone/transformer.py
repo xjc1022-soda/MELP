@@ -871,23 +871,27 @@ class MultimodalTransformer(Transformer):
         self.ln_final = norm_layer(width)
         self.text_projection = nn.Parameter(torch.empty(width, output_dim))
 
+        # torch.empty above is uninitialised memory: without this call the output
+        # projection holds whatever was on the heap (zeros in a fresh process, garbage
+        # after any allocation churn), which makes the caption loss start anywhere
+        # between ln(vocab) and 1e20. The other towers in this file initialise the
+        # same way at the end of __init__.
+        self.init_parameters()
+
     def init_parameters(self):
-        proj_std = (self.transformer.width ** -0.5) * ((2 * self.transformer.layers) ** -0.5)
-        attn_std = self.transformer.width ** -0.5
-        fc_std = (2 * self.transformer.width) ** -0.5
-        for block in self.transformer.resblocks:
-            nn.init.normal_(block.attn.in_proj_weight, std=attn_std)
-            nn.init.normal_(block.attn.out_proj.weight, std=proj_std)
-            nn.init.normal_(block.mlp.c_fc.weight, std=fc_std)
-            nn.init.normal_(block.mlp.c_proj.weight, std=proj_std)
-        for block in self.transformer.cross_attn:
+        # MultimodalTransformer subclasses Transformer, so width/layers/resblocks are
+        # its own attributes -- there is no self.transformer to reach through.
+        proj_std = (self.width ** -0.5) * ((2 * self.layers) ** -0.5)
+        attn_std = self.width ** -0.5
+        fc_std = (2 * self.width) ** -0.5
+        for block in list(self.resblocks) + list(self.cross_attn):
             nn.init.normal_(block.attn.in_proj_weight, std=attn_std)
             nn.init.normal_(block.attn.out_proj.weight, std=proj_std)
             nn.init.normal_(block.mlp.c_fc.weight, std=fc_std)
             nn.init.normal_(block.mlp.c_proj.weight, std=proj_std)
 
         if self.text_projection is not None:
-            nn.init.normal_(self.text_projection, std=self.transformer.width ** -0.5)
+            nn.init.normal_(self.text_projection, std=self.width ** -0.5)
 
     def build_attention_mask(self):
         # lazily create causal attention mask, with full attention between the tokens
